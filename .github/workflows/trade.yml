@@ -1,0 +1,34 @@
+name: Hourly Auto Trade
+
+on:
+  schedule:
+    - cron: '0 * * * *'  # 毎時0分
+  workflow_dispatch:
+
+jobs:
+  trade:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Execute trade
+        run: node scripts/trade.js
+
+      - name: Commit results
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "bot: 自動売買実行 #${{ github.run_number }}"
+          file_pattern: "data/*.json"

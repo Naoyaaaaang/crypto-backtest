@@ -1,0 +1,11 @@
+{
+  "cash": 1000,
+  "positionUnits": 0,
+  "positionEntry": 0,
+  "positionEntryTime": null,
+  "positionStrategy": null,
+  "totalValue": 1000,
+  "currentPrice": 0,
+  "startedAt": null,
+  "lastUpdated": null
+}
