@@ -173,40 +173,95 @@ function strategyLabel(params) {
   return '不明'
 }
 
-// ========== Binance API ==========
-function fetchCandles(symbol, limit) {
-  // Binance本家が弾かれる場合はバックアップURLにフォールバック
-  const endpoints = [
-    `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=1h&limit=${limit}`,
-    `https://api1.binance.com/api/v3/klines?symbol=${symbol}&interval=1h&limit=${limit}`,
-    `https://api2.binance.com/api/v3/klines?symbol=${symbol}&interval=1h&limit=${limit}`,
-    `https://api3.binance.com/api/v3/klines?symbol=${symbol}&interval=1h&limit=${limit}`,
-  ]
+// ========== 価格データ取得（Bybit → OKX → Kraken の順でフォールバック）==========
+function fetchFromBybit(symbol, limit) {
+  return new Promise((resolve, reject) => {
+    const url = `https://api.bybit.com/v5/market/kline?category=spot&symbol=${symbol}&interval=60&limit=${limit}`
+    https.get(url, (res) => {
+      let data = ''
+      res.on('data', c => data += c)
+      res.on('end', () => {
+        try {
+          const json = JSON.parse(data)
+          if (json.retCode !== 0 || !json.result?.list) return reject(new Error('Bybit: ' + json.retMsg))
+          // Bybitは新しい順なので逆順にする
+          const candles = [...json.result.list].reverse().map(k => ({
+            time: parseInt(k[0]),
+            close: parseFloat(k[4]),
+          }))
+          resolve(candles)
+        } catch (e) { reject(e) }
+      })
+    }).on('error', reject)
+  })
+}
 
-  function tryFetch(urls) {
-    if (urls.length === 0) return Promise.reject(new Error('全エンドポイントで取得失敗'))
-    const [url, ...rest] = urls
-    return new Promise((resolve, reject) => {
-      https.get(url, (res) => {
-        let data = ''
-        res.on('data', chunk => data += chunk)
-        res.on('end', () => {
-          try {
-            const raw = JSON.parse(data)
-            if (!Array.isArray(raw)) {
-              console.log(`⚠ ${url} → エラーレスポンス:`, JSON.stringify(raw).slice(0, 200))
-              return tryFetch(rest).then(resolve).catch(reject)
-            }
-            resolve(raw.map(k => ({ time: k[0], close: parseFloat(k[4]) })))
-          } catch (e) {
-            tryFetch(rest).then(resolve).catch(reject)
-          }
-        })
-      }).on('error', () => tryFetch(rest).then(resolve).catch(reject))
-    })
-  }
+function fetchFromOKX(symbol, limit) {
+  // BTCUSDT → BTC-USDT
+  const instId = symbol.replace('USDT', '-USDT')
+  return new Promise((resolve, reject) => {
+    const url = `https://www.okx.com/api/v5/market/candles?instId=${instId}&bar=1H&limit=${limit}`
+    https.get(url, (res) => {
+      let data = ''
+      res.on('data', c => data += c)
+      res.on('end', () => {
+        try {
+          const json = JSON.parse(data)
+          if (json.code !== '0' || !Array.isArray(json.data)) return reject(new Error('OKX: ' + json.msg))
+          const candles = [...json.data].reverse().map(k => ({
+            time: parseInt(k[0]),
+            close: parseFloat(k[4]),
+          }))
+          resolve(candles)
+        } catch (e) { reject(e) }
+      })
+    }).on('error', reject)
+  })
+}
 
-  return tryFetch(endpoints)
+function fetchFromKraken(symbol) {
+  const pair = symbol === 'BTCUSDT' ? 'XBTUSD' : 'ETHUSD'
+  return new Promise((resolve, reject) => {
+    const url = `https://api.kraken.com/0/public/OHLC?pair=${pair}&interval=60`
+    https.get(url, (res) => {
+      let data = ''
+      res.on('data', c => data += c)
+      res.on('end', () => {
+        try {
+          const json = JSON.parse(data)
+          if (json.error?.length) return reject(new Error('Kraken: ' + json.error[0]))
+          const list = json.result[Object.keys(json.result).find(k => k !== 'last')]
+          const candles = list.map(k => ({ time: k[0] * 1000, close: parseFloat(k[4]) }))
+          resolve(candles)
+        } catch (e) { reject(e) }
+      })
+    }).on('error', reject)
+  })
+}
+
+async function fetchCandles(symbol, limit) {
+  // Bybit
+  try {
+    const candles = await fetchFromBybit(symbol, limit)
+    console.log(`✅ Bybitから${candles.length}本取得`)
+    return candles
+  } catch (e) { console.log('⚠ Bybit失敗:', e.message) }
+
+  // OKX
+  try {
+    const candles = await fetchFromOKX(symbol, limit)
+    console.log(`✅ OKXから${candles.length}本取得`)
+    return candles
+  } catch (e) { console.log('⚠ OKX失敗:', e.message) }
+
+  // Kraken
+  try {
+    const candles = await fetchFromKraken(symbol)
+    console.log(`✅ Krakenから${candles.length}本取得`)
+    return candles
+  } catch (e) { console.log('⚠ Kraken失敗:', e.message) }
+
+  throw new Error('全取引所で価格取得失敗')
 }
 
 // ========== ファイル操作 ==========
