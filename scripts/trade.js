@@ -175,19 +175,38 @@ function strategyLabel(params) {
 
 // ========== Binance API ==========
 function fetchCandles(symbol, limit) {
-  return new Promise((resolve, reject) => {
-    const url = `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=1h&limit=${limit}`
-    https.get(url, (res) => {
-      let data = ''
-      res.on('data', chunk => data += chunk)
-      res.on('end', () => {
-        try {
-          const raw = JSON.parse(data)
-          resolve(raw.map(k => ({ time: k[0], close: parseFloat(k[4]) })))
-        } catch (e) { reject(e) }
-      })
-    }).on('error', reject)
-  })
+  // Binance本家が弾かれる場合はバックアップURLにフォールバック
+  const endpoints = [
+    `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=1h&limit=${limit}`,
+    `https://api1.binance.com/api/v3/klines?symbol=${symbol}&interval=1h&limit=${limit}`,
+    `https://api2.binance.com/api/v3/klines?symbol=${symbol}&interval=1h&limit=${limit}`,
+    `https://api3.binance.com/api/v3/klines?symbol=${symbol}&interval=1h&limit=${limit}`,
+  ]
+
+  function tryFetch(urls) {
+    if (urls.length === 0) return Promise.reject(new Error('全エンドポイントで取得失敗'))
+    const [url, ...rest] = urls
+    return new Promise((resolve, reject) => {
+      https.get(url, (res) => {
+        let data = ''
+        res.on('data', chunk => data += chunk)
+        res.on('end', () => {
+          try {
+            const raw = JSON.parse(data)
+            if (!Array.isArray(raw)) {
+              console.log(`⚠ ${url} → エラーレスポンス:`, JSON.stringify(raw).slice(0, 200))
+              return tryFetch(rest).then(resolve).catch(reject)
+            }
+            resolve(raw.map(k => ({ time: k[0], close: parseFloat(k[4]) })))
+          } catch (e) {
+            tryFetch(rest).then(resolve).catch(reject)
+          }
+        })
+      }).on('error', () => tryFetch(rest).then(resolve).catch(reject))
+    })
+  }
+
+  return tryFetch(endpoints)
 }
 
 // ========== ファイル操作 ==========
