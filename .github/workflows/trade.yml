@@ -2,7 +2,10 @@ name: Hourly Auto Trade
 
 on:
   schedule:
-    - cron: '0 * * * *'  # 毎時0分
+    - cron: '0 * * * *'   # 毎時0分（メイン）
+    - cron: '5 * * * *'   # 毎時5分（フォールバック）
+    - cron: '10 * * * *'  # 毎時10分（フォールバック）
+    - cron: '15 * * * *'  # 毎時15分（フォールバック）
   workflow_dispatch:
 
 jobs:

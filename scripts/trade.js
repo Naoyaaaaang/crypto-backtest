@@ -295,6 +295,21 @@ async function main() {
     portfolio.startedAt = new Date().toISOString()
   }
 
+  // 同じUTC時間内にすでに実行済みならスキップ（4重cronのフォールバック用）
+  if (portfolio.lastUpdated) {
+    const last = new Date(portfolio.lastUpdated)
+    const now = new Date()
+    const sameHour =
+      last.getUTCFullYear() === now.getUTCFullYear() &&
+      last.getUTCMonth() === now.getUTCMonth() &&
+      last.getUTCDate() === now.getUTCDate() &&
+      last.getUTCHours() === now.getUTCHours()
+    if (sameHour) {
+      console.log(`⏭ 今時間（UTC ${now.getUTCHours()}:xx）はすでに実行済みです。スキップ。`)
+      process.exit(0)
+    }
+  }
+
   // 価格データ取得
   let candles
   try {
