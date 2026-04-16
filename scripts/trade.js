@@ -76,67 +76,79 @@ function bollingerBands(prices, period, stdMult) {
   return { upper, middle, lower }
 }
 
-// ========== シグナル生成 ==========
-function getSignal(closes, params, inPosition) {
-  const n = closes.length
-  if (n < 2) return 'hold'
+// ========== 方向予測（UP or DOWN）==========
+// 各戦略が「次の1時間は上がるか下がるか」を予測する
+function getPrediction(closes, params) {
+  const i = closes.length - 1
 
   if (params.type === 'ma_cross') {
+    // 短期MA > 長期MA → 上昇トレンド → UP
     const short = ema(closes, params.shortPeriod)
     const long = ema(closes, params.longPeriod)
-    const i = n - 1
-    if (!short[i] || !long[i] || !short[i - 1] || !long[i - 1]) return 'hold'
-    const prevAbove = short[i - 1] > long[i - 1]
-    const currAbove = short[i] > long[i]
-    if (!prevAbove && currAbove) return 'buy'
-    if (prevAbove && !currAbove) return 'sell'
-    return 'hold'
+    if (!short[i] || !long[i]) return 'up'
+    return short[i] > long[i] ? 'up' : 'down'
   }
 
-  if (params.type === 'rsi') {
-    const values = rsi(closes, params.rsiPeriod)
-    const r = values[n - 1]
-    if (r === null) return 'hold'
-    if (!inPosition && r < params.rsiBuy) return 'buy'
-    if (inPosition && r > params.rsiSell) return 'sell'
-    return 'hold'
+  if (params.type === 'rsi_trend') {
+    // RSI > 50 → 買い圧強い → UP
+    const values = rsi(closes, params.period)
+    const r = values[i]
+    if (r === null) return 'up'
+    return r > 50 ? 'up' : 'down'
   }
 
-  if (params.type === 'bbands') {
-    const bb = bollingerBands(closes, params.bbPeriod, params.bbStd)
-    const lower = bb.lower[n - 1]
-    const upper = bb.upper[n - 1]
-    const price = closes[n - 1]
-    if (!lower || !upper) return 'hold'
-    if (!inPosition && price <= lower) return 'buy'
-    if (inPosition && price >= upper) return 'sell'
-    return 'hold'
+  if (params.type === 'bb_position') {
+    // 中心線より上 → UP、下 → DOWN
+    const bb = bollingerBands(closes, params.period, 2.0)
+    const mid = bb.middle[i]
+    if (!mid) return 'up'
+    return closes[i] > mid ? 'up' : 'down'
   }
 
-  return 'hold'
+  if (params.type === 'momentum') {
+    // N時間前より現在価格が高い → UP
+    const past = closes[i - params.period]
+    if (past === undefined) return 'up'
+    return closes[i] > past ? 'up' : 'down'
+  }
+
+  return 'up'
 }
 
 // ========== 全戦略一覧 ==========
 function getAllStrategies() {
   const list = []
-  for (const s of [5, 10, 20]) {
-    for (const l of [50, 100, 200]) {
-      list.push({ type: 'ma_cross', shortPeriod: s, longPeriod: l, key: `ma_${s}_${l}` })
-    }
+
+  // MAクロス系（トレンドフォロー）
+  for (const [s, l] of [[5, 20], [5, 50], [10, 50], [20, 100], [5, 100]]) {
+    list.push({ type: 'ma_cross', shortPeriod: s, longPeriod: l, key: `ma_${s}_${l}` })
   }
-  for (const p of [7, 14]) {
-    for (const b of [25, 30]) {
-      for (const s of [70, 75]) {
-        list.push({ type: 'rsi', rsiPeriod: p, rsiBuy: b, rsiSell: s, key: `rsi_${p}_${b}_${s}` })
-      }
-    }
+
+  // RSIトレンド系（RSI>50=UP）
+  for (const p of [7, 14, 21]) {
+    list.push({ type: 'rsi_trend', period: p, key: `rsi_${p}` })
   }
-  for (const p of [20, 30]) {
-    for (const s of [2.0, 2.5]) {
-      list.push({ type: 'bbands', bbPeriod: p, bbStd: s, key: `bb_${p}_${s}` })
-    }
+
+  // ボリンジャーバンド位置（中心線比較）
+  for (const p of [20, 50]) {
+    list.push({ type: 'bb_position', period: p, key: `bb_${p}` })
   }
+
+  // モメンタム（N時間前比較）
+  for (const p of [3, 6, 12, 24]) {
+    list.push({ type: 'momentum', period: p, key: `mom_${p}` })
+  }
+
   return list
+}
+
+// ========== 戦略ラベル ==========
+function strategyLabel(params) {
+  if (params.type === 'ma_cross') return `MAクロス(${params.shortPeriod}/${params.longPeriod})`
+  if (params.type === 'rsi_trend') return `RSIトレンド(${params.period})`
+  if (params.type === 'bb_position') return `BB位置(${params.period})`
+  if (params.type === 'momentum') return `モメンタム(${params.period}h)`
+  return '不明'
 }
 
 // ========== 戦略スコアリング（ε-greedy）==========
@@ -149,11 +161,9 @@ function scoreStrategy(key, trades) {
 }
 
 function selectStrategy(trades, allStrategies, epsilon = 0.15) {
-  // 15%の確率で探索（ランダム選択）
   if (Math.random() < epsilon) {
     return allStrategies[Math.floor(Math.random() * allStrategies.length)]
   }
-  // 85%は活用（勝率最高の戦略）
   let best = allStrategies[0]
   let bestScore = -1
   for (const s of allStrategies) {
@@ -164,13 +174,6 @@ function selectStrategy(trades, allStrategies, epsilon = 0.15) {
     }
   }
   return best
-}
-
-function strategyLabel(params) {
-  if (params.type === 'ma_cross') return `MAクロス(${params.shortPeriod}/${params.longPeriod})`
-  if (params.type === 'rsi') return `RSI(${params.rsiPeriod}, ${params.rsiBuy}/${params.rsiSell})`
-  if (params.type === 'bbands') return `BB(${params.bbPeriod}, σ${params.bbStd})`
-  return '不明'
 }
 
 // ========== 価格データ取得（Bybit → OKX → Kraken の順でフォールバック）==========
@@ -184,7 +187,6 @@ function fetchFromBybit(symbol, limit) {
         try {
           const json = JSON.parse(data)
           if (json.retCode !== 0 || !json.result?.list) return reject(new Error('Bybit: ' + json.retMsg))
-          // Bybitは新しい順なので逆順にする
           const candles = [...json.result.list].reverse().map(k => ({
             time: parseInt(k[0]),
             close: parseFloat(k[4]),
@@ -197,7 +199,6 @@ function fetchFromBybit(symbol, limit) {
 }
 
 function fetchFromOKX(symbol, limit) {
-  // BTCUSDT → BTC-USDT
   const instId = symbol.replace('USDT', '-USDT')
   return new Promise((resolve, reject) => {
     const url = `https://www.okx.com/api/v5/market/candles?instId=${instId}&bar=1H&limit=${limit}`
@@ -240,21 +241,18 @@ function fetchFromKraken(symbol) {
 }
 
 async function fetchCandles(symbol, limit) {
-  // Bybit
   try {
     const candles = await fetchFromBybit(symbol, limit)
     console.log(`✅ Bybitから${candles.length}本取得`)
     return candles
   } catch (e) { console.log('⚠ Bybit失敗:', e.message) }
 
-  // OKX
   try {
     const candles = await fetchFromOKX(symbol, limit)
     console.log(`✅ OKXから${candles.length}本取得`)
     return candles
   } catch (e) { console.log('⚠ OKX失敗:', e.message) }
 
-  // Kraken
   try {
     const candles = await fetchFromKraken(symbol)
     console.log(`✅ Krakenから${candles.length}本取得`)
@@ -268,18 +266,43 @@ async function fetchCandles(symbol, limit) {
 function loadPortfolio() {
   if (!fs.existsSync(PORTFOLIO_FILE)) {
     return {
-      cash: INITIAL_CAPITAL, positionUnits: 0, positionEntry: 0,
-      positionEntryTime: null, positionStrategy: null,
-      totalValue: INITIAL_CAPITAL, currentPrice: 0,
-      startedAt: new Date().toISOString(), lastUpdated: null
+      cash: INITIAL_CAPITAL,
+      positionSide: null,   // 'long' | 'short' | null
+      positionCapital: 0,   // ポジションに入れた資金
+      positionEntry: 0,
+      positionEntryTime: null,
+      positionStrategy: null,
+      totalValue: INITIAL_CAPITAL,
+      currentPrice: 0,
+      startedAt: new Date().toISOString(),
+      lastUpdated: null
     }
   }
-  return JSON.parse(fs.readFileSync(PORTFOLIO_FILE, 'utf-8'))
+  const p = JSON.parse(fs.readFileSync(PORTFOLIO_FILE, 'utf-8'))
+  // 旧形式からの移行（positionUnitsを使っていた場合）
+  if (p.positionSide === undefined) {
+    p.positionSide = p.positionUnits > 0 ? 'long' : null
+    p.positionCapital = p.positionUnits > 0 ? p.positionUnits * p.positionEntry : 0
+    delete p.positionUnits
+  }
+  return p
 }
 
 function loadTrades() {
   if (!fs.existsSync(TRADES_FILE)) return []
   return JSON.parse(fs.readFileSync(TRADES_FILE, 'utf-8'))
+}
+
+// ========== P&L計算 ==========
+function calcExitValue(positionSide, positionCapital, entryPrice, exitPrice) {
+  if (positionSide === 'long') {
+    return positionCapital * (exitPrice / entryPrice)
+  }
+  if (positionSide === 'short') {
+    // ショート：価格が下がるほど利益
+    return positionCapital * (2 - exitPrice / entryPrice)
+  }
+  return positionCapital
 }
 
 // ========== メイン ==========
@@ -291,9 +314,7 @@ async function main() {
   const trades = loadTrades()
   const allStrategies = getAllStrategies()
 
-  if (!portfolio.startedAt) {
-    portfolio.startedAt = new Date().toISOString()
-  }
+  if (!portfolio.startedAt) portfolio.startedAt = new Date().toISOString()
 
   // 同じUTC時間内にすでに実行済みならスキップ（4重cronのフォールバック用）
   if (portfolio.lastUpdated) {
@@ -322,62 +343,25 @@ async function main() {
 
   const closes = candles.map(c => c.close)
   const currentPrice = closes[closes.length - 1]
-  const inPosition = portfolio.positionUnits > 0
-
   console.log(`💰 現在価格: $${currentPrice.toFixed(2)}`)
-  console.log(`📊 ポジション: ${inPosition ? `あり (エントリー: $${portfolio.positionEntry})` : 'なし'}`)
 
-  let action = 'hold'
-  let strategy = null
+  // ========== STEP1: 前回ポジションをクローズ ==========
+  if (portfolio.positionSide) {
+    const exitValue = calcExitValue(
+      portfolio.positionSide,
+      portfolio.positionCapital,
+      portfolio.positionEntry,
+      currentPrice
+    )
+    const pnl = exitValue - portfolio.positionCapital
+    const pnlPct = (pnl / portfolio.positionCapital) * 100
+    const sign = pnl >= 0 ? '+' : ''
 
-  if (inPosition) {
-    // エントリー時の戦略で売りシグナルを確認
-    strategy = allStrategies.find(s => s.key === portfolio.positionStrategy) || allStrategies[0]
-    const signal = getSignal(closes, strategy, true)
-    if (signal === 'sell') action = 'sell'
-  } else {
-    // 最良戦略を選んで買いシグナルを確認
-    strategy = selectStrategy(trades, allStrategies)
-    const signal = getSignal(closes, strategy, false)
-    if (signal === 'buy') action = 'buy'
-  }
+    const sideLabel = portfolio.positionSide === 'long' ? '📈 ロング' : '📉 ショート'
+    console.log(`🔒 ${sideLabel}クローズ: $${portfolio.positionEntry.toFixed(2)} → $${currentPrice.toFixed(2)} (${sign}$${pnl.toFixed(2)} / ${sign}${pnlPct.toFixed(2)}%)`)
 
-  console.log(`🎯 戦略: ${strategyLabel(strategy)} → ${action.toUpperCase()}`)
-
-  // 売買実行
-  if (action === 'buy') {
-    const units = portfolio.cash / currentPrice
-    portfolio.positionUnits = units
-    portfolio.positionEntry = currentPrice
-    portfolio.positionEntryTime = candles[candles.length - 1].time
-    portfolio.positionStrategy = strategy.key
-    portfolio.cash = 0
-
-    trades.push({
-      id: trades.length + 1,
-      strategy: strategy.key,
-      strategyLabel: strategyLabel(strategy),
-      symbol: SYMBOL,
-      side: 'buy',
-      price: currentPrice,
-      units,
-      time: candles[candles.length - 1].time,
-      closed: false,
-      exitPrice: null,
-      exitTime: null,
-      pnl: null,
-      pnlPct: null
-    })
-    console.log(`✅ 買い: ${units.toFixed(6)} BTC @ $${currentPrice}`)
-  }
-
-  if (action === 'sell') {
-    const exitValue = portfolio.positionUnits * currentPrice
-    const pnl = exitValue - (portfolio.positionUnits * portfolio.positionEntry)
-    const pnlPct = ((currentPrice - portfolio.positionEntry) / portfolio.positionEntry) * 100
-
-    // 対応するbuyトレードを閉じる
-    const openTrade = [...trades].reverse().find(t => t.side === 'buy' && !t.closed)
+    // 対応するオープントレードを閉じる
+    const openTrade = [...trades].reverse().find(t => !t.closed)
     if (openTrade) {
       openTrade.closed = true
       openTrade.exitPrice = currentPrice
@@ -387,17 +371,50 @@ async function main() {
     }
 
     portfolio.cash = exitValue
-    portfolio.positionUnits = 0
+    portfolio.positionSide = null
+    portfolio.positionCapital = 0
     portfolio.positionEntry = 0
     portfolio.positionEntryTime = null
     portfolio.positionStrategy = null
-
-    const sign = pnl >= 0 ? '+' : ''
-    console.log(`✅ 売り: $${currentPrice} (${sign}$${pnl.toFixed(2)} / ${sign}${pnlPct.toFixed(2)}%)`)
   }
 
+  // ========== STEP2: 新しい予測でエントリー ==========
+  const strategy = selectStrategy(trades, allStrategies)
+  const prediction = getPrediction(closes, strategy)
+  const side = prediction === 'up' ? 'long' : 'short'
+  const sideLabel = side === 'long' ? '📈 ロング' : '📉 ショート'
+
+  console.log(`🎯 戦略: ${strategyLabel(strategy)} → ${prediction.toUpperCase()} → ${sideLabel}エントリー`)
+
+  const capital = portfolio.cash
+  portfolio.positionSide = side
+  portfolio.positionCapital = capital
+  portfolio.positionEntry = currentPrice
+  portfolio.positionEntryTime = candles[candles.length - 1].time
+  portfolio.positionStrategy = strategy.key
+  portfolio.cash = 0
+
+  trades.push({
+    id: trades.length + 1,
+    strategy: strategy.key,
+    strategyLabel: strategyLabel(strategy),
+    symbol: SYMBOL,
+    side,
+    prediction,
+    entryPrice: currentPrice,
+    capital,
+    entryTime: candles[candles.length - 1].time,
+    closed: false,
+    exitPrice: null,
+    exitTime: null,
+    pnl: null,
+    pnlPct: null
+  })
+
+  // 現在の含み損益を計算して総資産を更新
+  const currentValue = calcExitValue(side, capital, currentPrice, currentPrice)
+  portfolio.totalValue = portfolio.cash + currentValue
   portfolio.currentPrice = currentPrice
-  portfolio.totalValue = portfolio.cash + portfolio.positionUnits * currentPrice
   portfolio.lastUpdated = new Date().toISOString()
 
   fs.writeFileSync(PORTFOLIO_FILE, JSON.stringify(portfolio, null, 2))
