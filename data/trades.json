@@ -1,1 +1,18 @@
-[]
+[
+  {
+    "id": 1,
+    "strategy": "ma_5_20",
+    "strategyLabel": "MAクロス(5/20)",
+    "symbol": "BTCUSDT",
+    "side": "long",
+    "prediction": "up",
+    "entryPrice": 75050.8,
+    "capital": 1000,
+    "entryTime": 1776319200000,
+    "closed": false,
+    "exitPrice": null,
+    "exitTime": null,
+    "pnl": null,
+    "pnlPct": null
+  }
+]
