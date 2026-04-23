@@ -9,9 +9,10 @@ interface Trade {
   strategyLabel: string
   symbol: string
   side: string
-  price: number
-  units: number
-  time: number
+  prediction: string
+  entryPrice: number
+  capital: number
+  entryTime: number
   closed: boolean
   exitPrice: number | null
   exitTime: number | null
@@ -21,7 +22,8 @@ interface Trade {
 
 interface Portfolio {
   cash: number
-  positionUnits: number
+  positionSide: 'long' | 'short' | null
+  positionCapital: number
   positionEntry: number
   positionStrategy: string | null
   totalValue: number
@@ -141,9 +143,9 @@ export default function Dashboard() {
         </div>
         <div className="bg-gray-800 rounded-xl p-4">
           <p className="text-gray-400 text-xs mb-1">現在のポジション</p>
-          {portfolio.positionUnits > 0 ? (
+          {portfolio.positionSide ? (
             <>
-              <p className="text-yellow-400 text-sm font-bold">保有中</p>
+              <p className="text-yellow-400 text-sm font-bold">{portfolio.positionSide === 'long' ? '📈 ロング' : '📉 ショート'}</p>
               <p className="text-gray-500 text-xs mt-1">エントリー ${portfolio.positionEntry.toFixed(0)}</p>
             </>
           ) : (
@@ -153,7 +155,7 @@ export default function Dashboard() {
       </div>
 
       {/* 現在使用中の戦略 */}
-      {portfolio.positionUnits > 0 && portfolio.positionStrategy && (
+      {portfolio.positionSide && portfolio.positionStrategy && (
         <div className="bg-yellow-900/30 border border-yellow-700/50 rounded-xl p-4 flex items-center gap-3">
           <span className="text-yellow-400 text-lg">⚡</span>
           <div>
@@ -228,7 +230,7 @@ export default function Dashboard() {
               {[...closedTrades].reverse().slice(0, 8).map(t => (
                 <div key={t.id} className="flex items-center justify-between text-xs">
                   <span className="text-gray-400 w-32 shrink-0">
-                    {new Date(t.time).toLocaleDateString('ja-JP', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                    {new Date(t.entryTime).toLocaleDateString('ja-JP', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
                   </span>
                   <span className="text-gray-300 flex-1 truncate">{t.strategyLabel}</span>
                   <span className={`font-bold ml-2 ${(t.pnl ?? 0) >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
