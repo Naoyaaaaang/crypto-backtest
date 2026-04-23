@@ -177,9 +177,10 @@ function selectStrategy(trades, allStrategies, epsilon = 0.15) {
 }
 
 // ========== 価格データ取得（Bybit → OKX → Kraken の順でフォールバック）==========
-function fetchFromBybit(symbol, limit) {
+// interval: Bybit/Kraken用の分数(60=1h, 240=4h)、okxBar: OKX用('1H','4H')
+function fetchFromBybit(symbol, limit, interval) {
   return new Promise((resolve, reject) => {
-    const url = `https://api.bybit.com/v5/market/kline?category=spot&symbol=${symbol}&interval=60&limit=${limit}`
+    const url = `https://api.bybit.com/v5/market/kline?category=spot&symbol=${symbol}&interval=${interval}&limit=${limit}`
     https.get(url, (res) => {
       let data = ''
       res.on('data', c => data += c)
@@ -198,10 +199,10 @@ function fetchFromBybit(symbol, limit) {
   })
 }
 
-function fetchFromOKX(symbol, limit) {
+function fetchFromOKX(symbol, limit, okxBar) {
   const instId = symbol.replace('USDT', '-USDT')
   return new Promise((resolve, reject) => {
-    const url = `https://www.okx.com/api/v5/market/candles?instId=${instId}&bar=1H&limit=${limit}`
+    const url = `https://www.okx.com/api/v5/market/candles?instId=${instId}&bar=${okxBar}&limit=${limit}`
     https.get(url, (res) => {
       let data = ''
       res.on('data', c => data += c)
@@ -220,10 +221,10 @@ function fetchFromOKX(symbol, limit) {
   })
 }
 
-function fetchFromKraken(symbol) {
+function fetchFromKraken(symbol, interval) {
   const pair = symbol === 'BTCUSDT' ? 'XBTUSD' : 'ETHUSD'
   return new Promise((resolve, reject) => {
-    const url = `https://api.kraken.com/0/public/OHLC?pair=${pair}&interval=60`
+    const url = `https://api.kraken.com/0/public/OHLC?pair=${pair}&interval=${interval}`
     https.get(url, (res) => {
       let data = ''
       res.on('data', c => data += c)
@@ -240,26 +241,26 @@ function fetchFromKraken(symbol) {
   })
 }
 
-async function fetchCandles(symbol, limit) {
+async function fetchCandles(symbol, limit, interval, okxBar, label) {
   try {
-    const candles = await fetchFromBybit(symbol, limit)
-    console.log(`✅ Bybitから${candles.length}本取得`)
+    const candles = await fetchFromBybit(symbol, limit, interval)
+    console.log(`✅ Bybitから${label} ${candles.length}本取得`)
     return candles
-  } catch (e) { console.log('⚠ Bybit失敗:', e.message) }
+  } catch (e) { console.log(`⚠ Bybit(${label})失敗:`, e.message) }
 
   try {
-    const candles = await fetchFromOKX(symbol, limit)
-    console.log(`✅ OKXから${candles.length}本取得`)
+    const candles = await fetchFromOKX(symbol, limit, okxBar)
+    console.log(`✅ OKXから${label} ${candles.length}本取得`)
     return candles
-  } catch (e) { console.log('⚠ OKX失敗:', e.message) }
+  } catch (e) { console.log(`⚠ OKX(${label})失敗:`, e.message) }
 
   try {
-    const candles = await fetchFromKraken(symbol)
-    console.log(`✅ Krakenから${candles.length}本取得`)
+    const candles = await fetchFromKraken(symbol, interval)
+    console.log(`✅ Krakenから${label} ${candles.length}本取得`)
     return candles
-  } catch (e) { console.log('⚠ Kraken失敗:', e.message) }
+  } catch (e) { console.log(`⚠ Kraken(${label})失敗:`, e.message) }
 
-  throw new Error('全取引所で価格取得失敗')
+  throw new Error(`全取引所で価格取得失敗(${label})`)
 }
 
 // ========== ファイル操作 ==========
@@ -331,17 +332,20 @@ async function main() {
     }
   }
 
-  // 価格データ取得
-  let candles
+  // 価格データ取得（1h + 4h の同時取得）
+  let candles1h, candles4h
   try {
-    candles = await fetchCandles(SYMBOL, CANDLE_LIMIT)
-    console.log(`✅ ${candles.length}本取得`)
+    ;[candles1h, candles4h] = await Promise.all([
+      fetchCandles(SYMBOL, CANDLE_LIMIT, 60, '1H', '1h'),
+      fetchCandles(SYMBOL, 100, 240, '4H', '4h'),
+    ])
   } catch (e) {
     console.error('❌ 価格取得失敗:', e.message)
     process.exit(1)
   }
 
-  const closes = candles.map(c => c.close)
+  const closes = candles1h.map(c => c.close)
+  const closes4h = candles4h.map(c => c.close)
   const currentPrice = closes[closes.length - 1]
   console.log(`💰 現在価格: $${currentPrice.toFixed(2)}`)
 
@@ -365,7 +369,7 @@ async function main() {
     if (openTrade) {
       openTrade.closed = true
       openTrade.exitPrice = currentPrice
-      openTrade.exitTime = candles[candles.length - 1].time
+      openTrade.exitTime = candles1h[candles1h.length - 1].time
       openTrade.pnl = Math.round(pnl * 100) / 100
       openTrade.pnlPct = Math.round(pnlPct * 100) / 100
     }
@@ -378,19 +382,25 @@ async function main() {
     portfolio.positionStrategy = null
   }
 
-  // ========== STEP2: 新しい予測でエントリー ==========
+  // ========== STEP2: 新しい予測でエントリー（マルチタイムフレーム）==========
   const strategy = selectStrategy(trades, allStrategies)
-  const prediction = getPrediction(closes, strategy)
+  const prediction1h = getPrediction(closes, strategy)
+  const prediction4h = getPrediction(closes4h, strategy)
+
+  // 1hと4hが一致 → その方向、不一致 → 4h足を優先（大きなトレンドに従う）
+  const prediction = prediction1h === prediction4h ? prediction1h : prediction4h
+  const tfAgreed = prediction1h === prediction4h
   const side = prediction === 'up' ? 'long' : 'short'
   const sideLabel = side === 'long' ? '📈 ロング' : '📉 ショート'
 
-  console.log(`🎯 戦略: ${strategyLabel(strategy)} → ${prediction.toUpperCase()} → ${sideLabel}エントリー`)
+  console.log(`📊 1h: ${prediction1h.toUpperCase()}, 4h: ${prediction4h.toUpperCase()} → ${tfAgreed ? '✅ 一致' : '⚠ 不一致(4h優先)'}`)
+  console.log(`🎯 戦略: ${strategyLabel(strategy)} → ${sideLabel}エントリー`)
 
   const capital = portfolio.cash
   portfolio.positionSide = side
   portfolio.positionCapital = capital
   portfolio.positionEntry = currentPrice
-  portfolio.positionEntryTime = candles[candles.length - 1].time
+  portfolio.positionEntryTime = candles1h[candles1h.length - 1].time
   portfolio.positionStrategy = strategy.key
   portfolio.cash = 0
 
@@ -403,7 +413,7 @@ async function main() {
     prediction,
     entryPrice: currentPrice,
     capital,
-    entryTime: candles[candles.length - 1].time,
+    entryTime: candles1h[candles1h.length - 1].time,
     closed: false,
     exitPrice: null,
     exitTime: null,
