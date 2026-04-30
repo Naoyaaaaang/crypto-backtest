@@ -1,12 +1,12 @@
 {
   "cash": 0,
-  "positionEntry": 76071.8,
-  "positionEntryTime": 1777539600000,
+  "positionEntry": 76053.3,
+  "positionEntryTime": 1777543200000,
   "positionStrategy": "mom_12",
-  "totalValue": 972.6642666610437,
-  "currentPrice": 76071.8,
+  "totalValue": 972.9008101493433,
+  "currentPrice": 76053.3,
   "startedAt": "2026-04-15T23:29:16.543Z",
-  "lastUpdated": "2026-04-30T09:15:27.739Z",
+  "lastUpdated": "2026-04-30T10:44:19.810Z",
   "positionSide": "short",
-  "positionCapital": 972.6642666610437
+  "positionCapital": 972.9008101493433
 }
