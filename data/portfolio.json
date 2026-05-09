@@ -1,12 +1,12 @@
 {
   "cash": 0,
-  "positionEntry": 80834.6,
-  "positionEntryTime": 1778360400000,
+  "positionEntry": 80773.5,
+  "positionEntryTime": 1778364000000,
   "positionStrategy": "ma_5_50",
-  "totalValue": 968.5129040022225,
-  "currentPrice": 80834.6,
+  "totalValue": 967.7808395343518,
+  "currentPrice": 80773.5,
   "startedAt": "2026-04-15T23:29:16.543Z",
-  "lastUpdated": "2026-05-09T21:04:10.059Z",
+  "lastUpdated": "2026-05-09T22:02:58.227Z",
   "positionSide": "long",
-  "positionCapital": 968.5129040022225
+  "positionCapital": 967.7808395343518
 }
