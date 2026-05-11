@@ -1,12 +1,12 @@
 {
   "cash": 0,
-  "positionEntry": 81635.9,
-  "positionEntryTime": 1778515200000,
+  "positionEntry": 81657.8,
+  "positionEntryTime": 1778518800000,
   "positionStrategy": "ma_10_50",
-  "totalValue": 978.1136119908426,
-  "currentPrice": 81635.9,
+  "totalValue": 978.3760049834184,
+  "currentPrice": 81657.8,
   "startedAt": "2026-04-15T23:29:16.543Z",
-  "lastUpdated": "2026-05-11T16:10:36.566Z",
+  "lastUpdated": "2026-05-11T17:17:05.436Z",
   "positionSide": "long",
-  "positionCapital": 978.1136119908426
+  "positionCapital": 978.3760049834184
 }
